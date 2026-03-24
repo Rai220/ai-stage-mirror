@@ -58,7 +58,11 @@
     flex: 1; position: relative; display: flex;
     align-items: center; justify-content: center;
     background: #000; overflow: hidden;
+    border: 4px solid transparent; transition: border-color 0.5s ease;
   }
+  .video-section.border-good { border-color: var(--accent-good); box-shadow: inset 0 0 30px rgba(0,232,157,0.15); }
+  .video-section.border-warn { border-color: var(--accent-warn); box-shadow: inset 0 0 30px rgba(255,184,48,0.15); }
+  .video-section.border-bad { border-color: var(--accent-bad); box-shadow: inset 0 0 30px rgba(255,68,102,0.2); }
   #video {
     position: absolute; width: 100%; height: 100%;
     object-fit: cover; transform: scaleX(-1);
@@ -268,6 +272,7 @@
   var leftBoxEl = document.getElementById('leftBox');
   var rightBoxEl = document.getElementById('rightBox');
   var mouthVizCanvas = document.getElementById('mouthViz');
+  var videoSection = document.querySelector('.video-section');
   var mouthVizCtx = mouthVizCanvas.getContext('2d');
   var statusDotEl = document.getElementById('statusDot');
   var statusTextEl = document.getElementById('statusText');
@@ -357,7 +362,49 @@
   }
 
   var prevScore='', prevLevel='', prevWeak='', prevLh='', prevRh='';
-  var HYSTERESIS=3; // prevents oscillation near thresholds
+  var HYSTERESIS=3;
+  var lastFeedbackTime=0;
+  var FEEDBACK_INTERVAL=1500;
+  var weakLeftCount=0, weakRightCount=0, weakNoneCount=0;
+  var stableWeak='none';
+  var WEAK_FRAMES=10;
+  var lastBorderLevel='';
+  var lastBorderTime=0;
+  var BORDER_INTERVAL=600; // border changes at most every 600ms
+  var audioCtx=null;
+  var lastAlertTime=0;
+  var ALERT_COOLDOWN=3000; // sound at most every 3s
+
+  function getAudioCtx(){
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playAlert(){
+    var now=performance.now();
+    if(now-lastAlertTime<ALERT_COOLDOWN) return;
+    lastAlertTime=now;
+    var ac=getAudioCtx();
+    // two-tone descending beep
+    var osc=ac.createOscillator();
+    var gain=ac.createGain();
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.type='triangle';
+    osc.frequency.setValueAtTime(660,ac.currentTime);
+    osc.frequency.linearRampToValueAtTime(440,ac.currentTime+0.15);
+    gain.gain.setValueAtTime(0.25,ac.currentTime);
+    gain.gain.linearRampToValueAtTime(0,ac.currentTime+0.3);
+    osc.start(ac.currentTime);
+    osc.stop(ac.currentTime+0.3);
+  }
+
+  function setBorder(level){
+    var now=performance.now();
+    if(level===lastBorderLevel||now-lastBorderTime<BORDER_INTERVAL) return;
+    lastBorderTime=now;
+    lastBorderLevel=level;
+    videoSection.className='video-section border-'+level;
+  }
 
   function updateUI(a) {
     smoothedScore=smoothedScore*0.85+a.score*0.15;
@@ -371,9 +418,17 @@
     if(a.lh!==prevLh){ leftValEl.textContent=a.lh; prevLh=a.lh; }
     if(a.rh!==prevRh){ rightValEl.textContent=a.rh; prevRh=a.rh; }
 
+    // stabilize weakSide
+    if(a.weakSide==='left'){ weakLeftCount++; weakRightCount=0; weakNoneCount=0; }
+    else if(a.weakSide==='right'){ weakRightCount++; weakLeftCount=0; weakNoneCount=0; }
+    else { weakNoneCount++; weakLeftCount=0; weakRightCount=0; }
+    if(weakLeftCount>=WEAK_FRAMES) stableWeak='left';
+    else if(weakRightCount>=WEAK_FRAMES) stableWeak='right';
+    else if(weakNoneCount>=WEAK_FRAMES) stableWeak='none';
+
+    // determine level with hysteresis
     var thr=sensitivity;
     var goodThr=100-thr*0.5, warnThr=100-thr;
-    // hysteresis: require crossing threshold by HYSTERESIS points to change level
     var level=prevLevel;
     if(prevLevel==='good'&&ds<goodThr-HYSTERESIS) level=ds>=warnThr?'warn':'bad';
     else if(prevLevel==='warn'&&ds>=goodThr+HYSTERESIS) level='good';
@@ -381,34 +436,40 @@
     else if(prevLevel==='bad'&&ds>=warnThr+HYSTERESIS) level=ds>=goodThr?'good':'warn';
     else if(!prevLevel) level=ds>=goodThr?'good':ds>=warnThr?'warn':'bad';
 
-    if(level!==prevLevel||a.weakSide!==prevWeak){
+    // update color + border on level change
+    if(level!==prevLevel){
       prevLevel=level;
-      var color;
-      if(level==='good'){
-        color='var(--accent-good)';
+      var color=level==='good'?'var(--accent-good)':level==='warn'?'var(--accent-warn)':'var(--accent-bad)';
+      scoreEl.style.color=color;
+      meterEl.style.background=color;
+      if(level==='bad') playAlert();
+    }
+    setBorder(prevLevel);
+
+    // update feedback text at most every FEEDBACK_INTERVAL ms
+    var now=performance.now();
+    if(now-lastFeedbackTime>=FEEDBACK_INTERVAL){
+      lastFeedbackTime=now;
+      if(prevLevel==='good'){
         labelEl.textContent='Excellent symmetry';
         hintEl.className='hint-box good';
         hintEl.textContent='Great! Your mouth opens symmetrically.';
-      } else if(level==='warn'){
-        color='var(--accent-warn)';
+      } else if(prevLevel==='warn'){
         labelEl.textContent='Slight asymmetry';
         hintEl.className='hint-box warning';
-        var s=a.weakSide==='left'?'left':a.weakSide==='right'?'right':'';
+        var s=stableWeak==='left'?'left':stableWeak==='right'?'right':'';
         hintEl.textContent=s?'Weaker '+s+' side. Engage muscles on the '+s+'.':'Slight deviation detected.';
       } else {
-        color='var(--accent-bad)';
         labelEl.textContent='Notable asymmetry';
         hintEl.className='hint-box bad';
-        var s2=a.weakSide==='left'?'left':a.weakSide==='right'?'right':'';
+        var s2=stableWeak==='left'?'left':stableWeak==='right'?'right':'';
         hintEl.textContent=s2?'Notable asymmetry: '+s2+' side is weaker. Slow down and focus.':'Mouth opens unevenly. Slow down.';
       }
-      scoreEl.style.color=color;
-      meterEl.style.background=color;
-    }
-    if(a.weakSide!==prevWeak){
-      prevWeak=a.weakSide;
-      leftBoxEl.classList.toggle('weak',a.weakSide==='left');
-      rightBoxEl.classList.toggle('weak',a.weakSide==='right');
+      if(stableWeak!==prevWeak){
+        prevWeak=stableWeak;
+        leftBoxEl.classList.toggle('weak',stableWeak==='left');
+        rightBoxEl.classList.toggle('weak',stableWeak==='right');
+      }
     }
     drawMouthMini(a);
   }

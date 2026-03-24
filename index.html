@@ -356,36 +356,60 @@
     }
   }
 
+  var prevScore='', prevLevel='', prevWeak='', prevLh='', prevRh='';
+  var HYSTERESIS=3; // prevents oscillation near thresholds
+
   function updateUI(a) {
-    smoothedScore=smoothedScore*0.7+a.score*0.3;
+    smoothedScore=smoothedScore*0.85+a.score*0.15;
     var ds=Math.round(smoothedScore);
-    scoreEl.textContent=ds+'%';
-    leftValEl.textContent=a.lh;
-    rightValEl.textContent=a.rh;
-    var thr=sensitivity,color;
-    if(ds>=100-thr*0.5){
-      color='var(--accent-good)';
-      labelEl.textContent='Excellent symmetry';
-      hintEl.className='hint-box good';
-      hintEl.textContent='Great! Your mouth opens symmetrically.';
-    } else if(ds>=100-thr){
-      color='var(--accent-warn)';
-      labelEl.textContent='Slight asymmetry';
-      hintEl.className='hint-box warning';
-      var s=a.weakSide==='left'?'left':a.weakSide==='right'?'right':'';
-      hintEl.textContent=s?'Weaker '+s+' side. Engage muscles on the '+s+'.':'Slight deviation detected.';
-    } else {
-      color='var(--accent-bad)';
-      labelEl.textContent='Notable asymmetry';
-      hintEl.className='hint-box bad';
-      var s2=a.weakSide==='left'?'left':a.weakSide==='right'?'right':'';
-      hintEl.textContent=s2?'Notable asymmetry: '+s2+' side is weaker. Slow down and focus.':'Mouth opens unevenly. Slow down.';
+    var scoreStr=ds+'%';
+    if(scoreStr!==prevScore){
+      scoreEl.textContent=scoreStr;
+      meterEl.style.width=ds+'%';
+      prevScore=scoreStr;
     }
-    scoreEl.style.color=color;
-    meterEl.style.width=ds+'%';
-    meterEl.style.background=color;
-    leftBoxEl.className='side-box'+(a.weakSide==='left'?' weak':'');
-    rightBoxEl.className='side-box'+(a.weakSide==='right'?' weak':'');
+    if(a.lh!==prevLh){ leftValEl.textContent=a.lh; prevLh=a.lh; }
+    if(a.rh!==prevRh){ rightValEl.textContent=a.rh; prevRh=a.rh; }
+
+    var thr=sensitivity;
+    var goodThr=100-thr*0.5, warnThr=100-thr;
+    // hysteresis: require crossing threshold by HYSTERESIS points to change level
+    var level=prevLevel;
+    if(prevLevel==='good'&&ds<goodThr-HYSTERESIS) level=ds>=warnThr?'warn':'bad';
+    else if(prevLevel==='warn'&&ds>=goodThr+HYSTERESIS) level='good';
+    else if(prevLevel==='warn'&&ds<warnThr-HYSTERESIS) level='bad';
+    else if(prevLevel==='bad'&&ds>=warnThr+HYSTERESIS) level=ds>=goodThr?'good':'warn';
+    else if(!prevLevel) level=ds>=goodThr?'good':ds>=warnThr?'warn':'bad';
+
+    if(level!==prevLevel||a.weakSide!==prevWeak){
+      prevLevel=level;
+      var color;
+      if(level==='good'){
+        color='var(--accent-good)';
+        labelEl.textContent='Excellent symmetry';
+        hintEl.className='hint-box good';
+        hintEl.textContent='Great! Your mouth opens symmetrically.';
+      } else if(level==='warn'){
+        color='var(--accent-warn)';
+        labelEl.textContent='Slight asymmetry';
+        hintEl.className='hint-box warning';
+        var s=a.weakSide==='left'?'left':a.weakSide==='right'?'right':'';
+        hintEl.textContent=s?'Weaker '+s+' side. Engage muscles on the '+s+'.':'Slight deviation detected.';
+      } else {
+        color='var(--accent-bad)';
+        labelEl.textContent='Notable asymmetry';
+        hintEl.className='hint-box bad';
+        var s2=a.weakSide==='left'?'left':a.weakSide==='right'?'right':'';
+        hintEl.textContent=s2?'Notable asymmetry: '+s2+' side is weaker. Slow down and focus.':'Mouth opens unevenly. Slow down.';
+      }
+      scoreEl.style.color=color;
+      meterEl.style.background=color;
+    }
+    if(a.weakSide!==prevWeak){
+      prevWeak=a.weakSide;
+      leftBoxEl.classList.toggle('weak',a.weakSide==='left');
+      rightBoxEl.classList.toggle('weak',a.weakSide==='right');
+    }
     drawMouthMini(a);
   }
 

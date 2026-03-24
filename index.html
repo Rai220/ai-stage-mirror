@@ -134,16 +134,16 @@
   .hint-box.good { border-color: rgba(0,232,157,0.2); background: rgba(0,232,157,0.04); color: var(--accent-good); }
   .hint-box.warning { border-color: rgba(255,184,48,0.25); background: rgba(255,184,48,0.04); color: var(--accent-warn); }
   .hint-box.bad { border-color: rgba(255,68,102,0.25); background: rgba(255,68,102,0.04); color: var(--accent-bad); }
-  .sensitivity-control { display: flex; align-items: center; gap: 10px; }
-  .sensitivity-control input[type="range"] {
-    flex: 1; -webkit-appearance: none; height: 4px;
-    background: var(--border); border-radius: 2px; outline: none;
+  .difficulty-buttons { display: flex; gap: 6px; }
+  .diff-btn {
+    flex: 1; padding: 8px 4px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text-dim); font-family: 'Outfit', sans-serif;
+    font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s; text-align: center;
   }
-  .sensitivity-control input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 14px; height: 14px;
-    border-radius: 50%; background: var(--accent-good); cursor: pointer;
-  }
-  .sensitivity-value { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); min-width: 28px; text-align: right; }
+  .diff-btn:hover { border-color: var(--accent-blue); }
+  .diff-btn.active { border-color: var(--accent-good); color: var(--accent-good); background: rgba(0,232,157,0.05); }
+  .diff-btn .diff-label { display: block; margin-bottom: 2px; }
+  .diff-btn .diff-desc { display: block; font-size: 10px; color: var(--text-dim); font-weight: 300; }
   .exercise-list { display: flex; flex-direction: column; gap: 6px; }
   .exercise-item {
     display: flex; align-items: flex-start; gap: 8px;
@@ -219,11 +219,20 @@
         <div class="hint-box" id="hintBox">Enable camera and center your face in the frame</div>
       </div>
       <div class="panel">
-        <div class="panel-title">Sensitivity</div>
-        <div class="sensitivity-control">
-          <span style="font-size:12px;color:var(--text-dim)">Threshold</span>
-          <input type="range" id="sensitivitySlider" min="2" max="20" value="8">
-          <span class="sensitivity-value" id="sensitivityValue">8%</span>
+        <div class="panel-title">Difficulty</div>
+        <div class="difficulty-buttons" id="difficultyBtns">
+          <button class="diff-btn" data-sensitivity="12" data-multiplier="400">
+            <span class="diff-label">Easy</span>
+            <span class="diff-desc">Beginner</span>
+          </button>
+          <button class="diff-btn active" data-sensitivity="8" data-multiplier="600">
+            <span class="diff-label">Medium</span>
+            <span class="diff-desc">Regular</span>
+          </button>
+          <button class="diff-btn" data-sensitivity="5" data-multiplier="900">
+            <span class="diff-label">Hard</span>
+            <span class="diff-desc">Pro</span>
+          </button>
         </div>
       </div>
       <div class="panel">
@@ -256,6 +265,7 @@
 <script>
 (function() {
   var sensitivity = 8;
+  var asymMultiplier = 600;
   var video = document.getElementById('video');
   var canvasEl = document.getElementById('overlay');
   var ctx = canvasEl.getContext('2d');
@@ -315,7 +325,7 @@
     var score=100, weakSide='none';
     if(openRatio>MIN_OPEN_RATIO){
       var asym=Math.abs(leftOpen-rightOpen)/totalOpen; // 0..1
-      score=Math.max(0,Math.min(100,100-asym*600));
+      score=Math.max(0,Math.min(100,100-asym*asymMultiplier));
       if(asym>0.03) weakSide=leftOpen<rightOpen?'left':'right';
     }
 
@@ -555,9 +565,13 @@
     }
   });
 
-  document.getElementById('sensitivitySlider').addEventListener('input',function(){
-    sensitivity=parseInt(this.value);
-    document.getElementById('sensitivityValue').textContent=sensitivity+'%';
+  document.getElementById('difficultyBtns').addEventListener('click',function(e){
+    var btn=e.target.closest('.diff-btn');
+    if(!btn) return;
+    this.querySelectorAll('.diff-btn').forEach(function(b){b.classList.remove('active');});
+    btn.classList.add('active');
+    sensitivity=parseInt(btn.dataset.sensitivity);
+    asymMultiplier=parseInt(btn.dataset.multiplier);
   });
 
   document.getElementById('exerciseList').addEventListener('click',function(e){

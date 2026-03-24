@@ -256,7 +256,6 @@
 <script>
 (function() {
   var sensitivity = 8;
-  var smoothedScore = 100;
   var video = document.getElementById('video');
   var canvasEl = document.getElementById('overlay');
   var ctx = canvasEl.getContext('2d');
@@ -281,33 +280,45 @@
   var MOUTH_OUTER = [61,146,91,181,84,17,314,405,321,375,291,409,270,269,267,0,37,39,40,185];
   var MOUTH_INNER = [78,191,80,81,82,13,312,311,310,415,308,324,318,402,317,14,87,178,88,95];
   var LEFT_CORNER = 61, RIGHT_CORNER = 291, TOP_CENTER = 13, BOTTOM_CENTER = 14, NOSE_TIP = 1;
-  var LEFT_UPPER = [13,82,81,80,191,78], LEFT_LOWER = [14,87,178,88,95,78];
-  var RIGHT_UPPER = [13,312,311,310,415,308], RIGHT_LOWER = [14,317,402,318,324,308];
-
-  function dist(a, b) { return Math.sqrt(Math.pow(a.x-b.x,2)+Math.pow(a.y-b.y,2)); }
-
-  function sideHeight(lm, upper, lower) {
-    var sum=0, n=Math.min(upper.length,lower.length);
-    for(var i=0;i<n;i++) sum+=Math.abs(lm[upper[i]].y-lm[lower[i]].y);
-    return sum/n;
-  }
+  // left/right lip pairs: upper vs lower, excluding center (13/14) and corners
+  var LEFT_UPPER = [82,81,80,191], LEFT_LOWER = [87,178,88,95];
+  var RIGHT_UPPER = [312,311,310,415], RIGHT_LOWER = [317,402,318,324];
+  var MIN_OPEN_RATIO = 0.08; // mouth must open >8% of its width to measure asymmetry
 
   function analyze(lm) {
-    var nose=lm[NOSE_TIP], lc=lm[LEFT_CORNER], rc=lm[RIGHT_CORNER];
-    var ld=dist(nose,lc), rd=dist(nose,rc);
-    var lh=sideHeight(lm,LEFT_UPPER,LEFT_LOWER);
-    var rh=sideHeight(lm,RIGHT_UPPER,RIGHT_LOWER);
-    var lcY=lc.y-nose.y, rcY=rc.y-nose.y;
-    var maxD=Math.max(ld,rd,0.001);
-    var cornerAsym=Math.abs(ld-rd)/maxD*100;
-    var maxH=Math.max(lh,rh,0.0001);
-    var heightAsym=Math.abs(lh-rh)/maxH*100;
-    var cornerYAsym=Math.abs(lcY-rcY)/Math.max(Math.abs(lcY),Math.abs(rcY),0.001)*100;
-    var raw=cornerAsym*0.3+heightAsym*0.5+cornerYAsym*0.2;
-    var score=Math.max(0,Math.min(100,100-raw*2));
-    var weakSide='none';
-    if(heightAsym>5) weakSide=lh<rh?'left':'right';
-    return {score:score,lh:(lh*1000).toFixed(0),rh:(rh*1000).toFixed(0),weakSide:weakSide,lm:lm};
+    var lc=lm[LEFT_CORNER], rc=lm[RIGHT_CORNER];
+    // mouth's own coordinate system: horizontal = corner-to-corner
+    var dx=rc.x-lc.x, dy=rc.y-lc.y;
+    var mouthW=Math.sqrt(dx*dx+dy*dy)||0.001;
+    // normal (perpendicular to mouth line) = opening direction
+    var nx=-dy/mouthW, ny=dx/mouthW;
+
+    // project landmark onto mouth normal
+    function projN(idx){ return lm[idx].x*nx+lm[idx].y*ny; }
+
+    // left side opening: avg distance between upper and lower lip along normal
+    var leftOpen=0;
+    for(var i=0;i<LEFT_UPPER.length;i++)
+      leftOpen+=Math.abs(projN(LEFT_UPPER[i])-projN(LEFT_LOWER[i]));
+    leftOpen/=LEFT_UPPER.length;
+
+    var rightOpen=0;
+    for(var i=0;i<RIGHT_UPPER.length;i++)
+      rightOpen+=Math.abs(projN(RIGHT_UPPER[i])-projN(RIGHT_LOWER[i]));
+    rightOpen/=RIGHT_UPPER.length;
+
+    var totalOpen=(leftOpen+rightOpen)/2;
+    var openRatio=totalOpen/mouthW;
+
+    // if mouth is barely open — no meaningful asymmetry to detect
+    var score=100, weakSide='none';
+    if(openRatio>MIN_OPEN_RATIO){
+      var asym=Math.abs(leftOpen-rightOpen)/totalOpen; // 0..1
+      score=Math.max(0,Math.min(100,100-asym*600));
+      if(asym>0.03) weakSide=leftOpen<rightOpen?'left':'right';
+    }
+
+    return {score:score,lh:(leftOpen*1000).toFixed(0),rh:(rightOpen*1000).toFixed(0),weakSide:weakSide,lm:lm};
   }
 
   function drawOverlay(lm) {
@@ -370,10 +381,13 @@
   var WEAK_FRAMES=10;
   var lastBorderLevel='';
   var lastBorderTime=0;
-  var BORDER_INTERVAL=600; // border changes at most every 600ms
+  var BORDER_INTERVAL=600;
   var audioCtx=null;
   var lastAlertTime=0;
-  var ALERT_COOLDOWN=3000; // sound at most every 3s
+  var ALERT_COOLDOWN=3000;
+  // rolling window for 5-second accumulative score
+  var WINDOW_SEC=2;
+  var scoreHistory=[];  // {time, score} entries
 
   function getAudioCtx(){
     if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
@@ -407,8 +421,15 @@
   }
 
   function updateUI(a) {
-    smoothedScore=smoothedScore*0.85+a.score*0.15;
-    var ds=Math.round(smoothedScore);
+    var now=performance.now();
+    // rolling window: keep last WINDOW_SEC seconds of scores
+    scoreHistory.push({t:now,s:a.score});
+    var cutoff=now-WINDOW_SEC*1000;
+    while(scoreHistory.length>0&&scoreHistory[0].t<cutoff) scoreHistory.shift();
+    // average over window
+    var sum=0;
+    for(var i=0;i<scoreHistory.length;i++) sum+=scoreHistory[i].s;
+    var ds=Math.round(sum/scoreHistory.length);
     var scoreStr=ds+'%';
     if(scoreStr!==prevScore){
       scoreEl.textContent=scoreStr;
@@ -447,7 +468,6 @@
     setBorder(prevLevel);
 
     // update feedback text at most every FEEDBACK_INTERVAL ms
-    var now=performance.now();
     if(now-lastFeedbackTime>=FEEDBACK_INTERVAL){
       lastFeedbackTime=now;
       if(prevLevel==='good'){

@@ -1,9 +1,13 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Stage Mirror</title>
+<title>AI Stage Mirror — Real-time Facial Symmetry Trainer</title>
+<meta name="description" content="AI-powered mouth symmetry trainer for speakers and performers. Uses MediaPipe Face Mesh with 468 face landmarks via webcam.">
+<meta property="og:title" content="AI Stage Mirror">
+<meta property="og:description" content="Real-time facial symmetry analysis for speakers and performers using 468 face landmarks.">
+<meta property="og:type" content="website">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -243,7 +247,6 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
 
 <script>
@@ -256,6 +259,19 @@
   var startScreen = document.getElementById('startScreen');
   var startBtn = document.getElementById('startBtn');
   var loadingText = document.getElementById('loadingText');
+  var scoreEl = document.getElementById('scoreDisplay');
+  var labelEl = document.getElementById('scoreLabel');
+  var meterEl = document.getElementById('meterFill');
+  var hintEl = document.getElementById('hintBox');
+  var leftValEl = document.getElementById('leftVal');
+  var rightValEl = document.getElementById('rightVal');
+  var leftBoxEl = document.getElementById('leftBox');
+  var rightBoxEl = document.getElementById('rightBox');
+  var mouthVizCanvas = document.getElementById('mouthViz');
+  var mouthVizCtx = mouthVizCanvas.getContext('2d');
+  var statusDotEl = document.getElementById('statusDot');
+  var statusTextEl = document.getElementById('statusText');
+  var canvasW = 0, canvasH = 0;
 
   var MOUTH_OUTER = [61,146,91,181,84,17,314,405,321,375,291,409,270,269,267,0,37,39,40,185];
   var MOUTH_INNER = [78,191,80,81,82,13,312,311,310,415,308,324,318,402,317,14,87,178,88,95];
@@ -311,8 +327,8 @@
   }
 
   function drawMouthMini(a) {
-    var c=document.getElementById('mouthViz');
-    var cx=c.getContext('2d'); var W=c.width,H=c.height;
+    var c=mouthVizCanvas;
+    var cx=mouthVizCtx; var W=c.width,H=c.height;
     cx.clearRect(0,0,W,H); var lm=a.lm;
     var all=MOUTH_OUTER.concat(MOUTH_INNER).map(function(i){return lm[i];});
     var xs=all.map(function(p){return p.x;}),ys=all.map(function(p){return p.y;});
@@ -343,13 +359,9 @@
   function updateUI(a) {
     smoothedScore=smoothedScore*0.7+a.score*0.3;
     var ds=Math.round(smoothedScore);
-    var scoreEl=document.getElementById('scoreDisplay');
-    var labelEl=document.getElementById('scoreLabel');
-    var meterEl=document.getElementById('meterFill');
-    var hintEl=document.getElementById('hintBox');
     scoreEl.textContent=ds+'%';
-    document.getElementById('leftVal').textContent=a.lh;
-    document.getElementById('rightVal').textContent=a.rh;
+    leftValEl.textContent=a.lh;
+    rightValEl.textContent=a.rh;
     var thr=sensitivity,color;
     if(ds>=100-thr*0.5){
       color='var(--accent-good)';
@@ -372,8 +384,8 @@
     scoreEl.style.color=color;
     meterEl.style.width=ds+'%';
     meterEl.style.background=color;
-    document.getElementById('leftBox').className='side-box'+(a.weakSide==='left'?' weak':'');
-    document.getElementById('rightBox').className='side-box'+(a.weakSide==='right'?' weak':'');
+    leftBoxEl.className='side-box'+(a.weakSide==='left'?' weak':'');
+    rightBoxEl.className='side-box'+(a.weakSide==='right'?' weak':'');
     drawMouthMini(a);
   }
 
@@ -391,8 +403,10 @@
     });
     faceMesh.onResults(function(results){
       processing=false;
-      canvasEl.width=video.videoWidth;
-      canvasEl.height=video.videoHeight;
+      if(video.videoWidth!==canvasW||video.videoHeight!==canvasH){
+        canvasW=canvasEl.width=video.videoWidth;
+        canvasH=canvasEl.height=video.videoHeight;
+      }
       if(results.multiFaceLandmarks&&results.multiFaceLandmarks.length>0){
         var lm=results.multiFaceLandmarks[0];
         var a=analyze(lm);
@@ -426,8 +440,8 @@
       await faceMesh.initialize();
       faceMeshReady=true;
       startScreen.classList.add('hidden');
-      document.getElementById('statusDot').classList.add('active');
-      document.getElementById('statusText').textContent='camera on';
+      statusDotEl.classList.add('active');
+      statusTextEl.textContent='camera on';
       loop();
     } catch(err) {
       loadingText.textContent='Error: '+err.message;
